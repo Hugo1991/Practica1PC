@@ -3,6 +3,7 @@ package practica1;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Scanner;
 import java.util.concurrent.Semaphore;
 
@@ -17,16 +18,21 @@ public class WebProcessor {
 	private int maxDown; // máximo número de procesos que pueden descargar webs
 							// a la vez
 	private int progreso;
-	Semaphore semMaxDescargas;
-	Semaphore semMaxEscritura = new Semaphore(1);
-
+	private Semaphore semMaxDescargas;
+	private Semaphore semMaxEscritura = new Semaphore(1);
+	private ArrayList<Thread> hilos;
+	private Thread muestraProgreso = new Thread(() -> mostrarProgreso(), "hilo mostrar progreso");;
+	//private Thread detectaTecla=new Thread(()->detectaTecla(),"TerminaHilo");
 	public WebProcessor(String path, int nDown, int maxDown) {
 		ruta = path;
 		this.nDown = nDown;
 		this.maxDown = maxDown;
 		progreso = 0;
-		new Thread(() -> mostrarProgreso(), "hilo mostrar progreso").start();
+		muestraProgreso.setDaemon(true);
+		muestraProgreso.start();
 		semMaxDescargas = new Semaphore(maxDown);
+		hilos = new ArrayList<>();
+		new Thread(()->detectaTecla(),"TerminaHilo").start();
 	}
 
 	public void process(String fileName) {
@@ -37,22 +43,25 @@ public class WebProcessor {
 			String linea;
 			linea = b.readLine();
 
-			while (!(linea == null) && (progreso <= nDown)) {
-				semMaxDescargas.acquire();
+			while (!(linea == null) && (progreso < nDown)) {
+
 				String lineaCopia = linea;
-				new Thread(() -> descargaFichero(lineaCopia), "Hilo " + progreso).start();
-				
+				semMaxDescargas.acquire();
+				Thread th = new Thread(() -> descargaFichero(lineaCopia), "Hilo " + progreso);
+				th.start();
+				hilos.add(th);
 
 				linea = b.readLine();
 				progreso++;
 			}
-
+			terminarHilos();
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} catch (InterruptedException e) {
 			// TODO Auto-generated catch block
-			e.printStackTrace();
+			System.out.println("error");
+
 		}
 	}
 
@@ -61,6 +70,7 @@ public class WebProcessor {
 		// Creates a connection to a given url
 		Connection conn = Jsoup.connect(url);
 		try {
+
 			// Performs the connection and retrieves the response
 			Response resp = conn.execute();
 			// If the response is different from 200 OK,
@@ -78,14 +88,31 @@ public class WebProcessor {
 			escribirFichero("error.txt", url, false);
 			// System.out.println(progreso+" No se puede conectar");
 		}
+		semMaxDescargas.release();
 	}
 
 	private void escribirFichero(String fichero, String texto, boolean error) {
 		// semMaxEscritura.release();
-		
-		semMaxDescargas.release();
+
 	}
 
+	private void terminarHilos() {
+		try {
+			semMaxDescargas.acquire(nDown);
+		} catch (InterruptedException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		for (Thread hilo : hilos) {
+			hilo.interrupt();
+		}
+
+	}
+	private void detectaTecla(){
+		if (new Scanner(System.in).hasNextLine()) {
+			terminarHilos();
+		}
+	}
 	private void mostrarProgreso() {
 		while (true) {
 			System.out.println(progreso);
