@@ -32,11 +32,11 @@ public class WebProcessor {
 		this.nDown = nDown;
 		this.maxDown = maxDown;
 		progreso = 0;
-		//muestraProgreso.setDaemon(true);
+		 muestraProgreso.setDaemon(true);
 		muestraProgreso.start();
 		semMaxDescargas = new Semaphore(maxDown);
 		hilos = new ArrayList<>();
-		detectaTecla.start();
+		//detectaTecla.start();
 	}
 
 	public void process(String fileName) {
@@ -44,27 +44,24 @@ public class WebProcessor {
 			FileReader f = new FileReader(fileName);
 			BufferedReader b = new BufferedReader(f);
 			String linea;
-			linea = b.readLine();
-			while (!(linea == null)) {
-				if (progreso < nDown) {
+
+			while (((linea = b.readLine()) != null)&&((progreso < nDown))) {
+				if ((progreso < nDown)&&(linea!=null)) {
 					String lineaCopia = linea;
 					semMaxDescargas.acquire();
 					Thread th = new Thread(() -> descargaFichero(lineaCopia), "Hilo " + progreso);
 					th.start();
 					hilos.add(th);
 					progreso++;
-					linea = b.readLine();
-				}
-				else
+					
+				} else
 					terminarHilos();
 			}
-			// terminarHilos();
 
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} catch (InterruptedException e) {
-			terminarHilos();
 
 		}
 	}
@@ -76,8 +73,8 @@ public class WebProcessor {
 			Response resp = conn.execute();
 			if (resp.statusCode() == 200) {
 				String html = conn.get().html();
-				url=url.replace(".", " ");
-				escribirFichero(url.split(" ")[1] , html, false);
+				url = url.replace(".", " ");
+				escribirFichero(url.split(" ")[1], html, false);
 			} else
 				escribirFichero("error_log.txt", url, true);
 		} catch (IllegalArgumentException iae) {
@@ -100,7 +97,7 @@ public class WebProcessor {
 				bw.write(texto + "\n");
 				semMaxEscritura.release();
 			} else {
-				bw = new BufferedWriter(new FileWriter(fichero+".html", error));
+				bw = new BufferedWriter(new FileWriter(fichero + ".html", error));
 				bw.write(texto);
 			}
 			bw.close();
@@ -122,20 +119,28 @@ public class WebProcessor {
 		}
 	}
 
-	private void terminarHilos() {
-		for (Thread hilo : hilos) {
-			hilo.interrupt();
-		}
+	private boolean terminarHilos() {
+		boolean interrumpido=false;
 		try {
 			semMaxDescargas.acquire(nDown);
 			semMaxEscritura.acquire();
-			
+			for (Thread hilo : hilos) {
+				if (!hilo.isInterrupted())
+					hilo.interrupt();
+				else
+					interrumpido=true;
+			}
+
+			if (muestraProgreso.isAlive())
+				muestraProgreso.interrupt();
+			else
+				interrumpido=true;
+
 		} catch (InterruptedException e) {
 			System.out.println("weeeo");
-			detectaTecla.interrupt();
-			muestraProgreso.interrupt();
-		}
 
+		}
+		return interrumpido;
 	}
 
 	private void detectaTecla() {
@@ -154,13 +159,16 @@ public class WebProcessor {
 	}
 
 	private void mostrarProgreso() {
+
 		while (true) {
 			System.out.println(progreso);
+			
 			try {
 				Thread.sleep(3000);
 			} catch (InterruptedException e) {
 				// TODO Auto-generated catch block
-				terminarHilos();
+				
+				
 			}
 		}
 	}
@@ -171,7 +179,7 @@ public class WebProcessor {
 		String ficheroEntrada = new Scanner(System.in).nextLine();
 		System.out.println("Introduce el directorio donde quieres guardar las descargas");
 		String ruta = new Scanner(System.in).nextLine();
-		WebProcessor wp = new WebProcessor(ruta, 501, 20);
+		WebProcessor wp = new WebProcessor(ruta, 520, 20);
 		wp.process(ficheroEntrada);
 
 	}
