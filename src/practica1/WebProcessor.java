@@ -27,57 +27,71 @@ public class WebProcessor {
 	private Semaphore semMaxDescargas;
 	private Semaphore semMaxEscritura = new Semaphore(1);
 	private ArrayList<Thread> hilos;
-	private Thread muestraProgreso = new Thread(() -> mostrarProgreso(), "hilo mostrar progreso");
-	private Thread detectaTecla = new Thread(() -> detectaTecla(), "TerminaHilo");
-	private boolean terminar=false;
+	private Thread muestraProgreso = new Thread(() -> mostrarProgreso(), "Hilo mostrar progreso");
+	private boolean terminar = false;
+	private Thread finalizaProceso = new Thread(() -> terminarHilos(), "Termina hilo");
+
 	public WebProcessor(String path, int nDown, int maxDown) {
 		ruta = path;
 		this.nDown = nDown;
 		this.maxDown = maxDown;
-		progreso = 1;
+		progreso = 0;
 		muestraProgreso.setDaemon(true);
 		muestraProgreso.start();
-		semMaxDescargas = new Semaphore(maxDown);
+		semMaxDescargas = new Semaphore(this.maxDown);
 		hilos = new ArrayList<>();
-		detectaTecla.start();
+		finalizaProceso.start();
+
 	}
 
+	/**
+	 * metodo encargado de leer el fichero de texto que le pasamos al metodo. este metodo esta bajo sincronizacion condicional
+	 * @param fileName
+	 */
 	public void process(String fileName) {
 		try {
 			FileReader f = new FileReader(fileName);
 			BufferedReader b = new BufferedReader(f);
-			String linea;
-
-			while (((linea = b.readLine()) != null) && ((progreso <= nDown))&& !terminar) {
-
-				if ((progreso <= nDown) && (linea != null)) {
-					String lineaCopia = linea;
-					semMaxDescargas.acquire();
-					Thread th = new Thread(() -> descargaFichero(lineaCopia), "Hilo " + progreso);
-					th.start();
-					hilos.add(th);
-
-				} else
-					terminarHilos();
+			String linea = b.readLine();
+			while (!(linea == null) && !terminar && progreso < nDown) {
+				String lineaCopia = linea;
+				semMaxDescargas.acquire();
+				Thread th = new Thread(() -> descargaFichero(lineaCopia), "Hilo " + progreso);
+				hilos.add(th);
+				th.start();
 				progreso++;
+				semMaxDescargas.release();
+				linea = b.readLine();
 			}
-
+			b.close();
+			finalizaProceso.interrupt();
+			System.out.println("Proceso finalizado con " + progreso + " descargas.");
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} catch (InterruptedException e) {
 
 		}
 	}
 
+	/**
+	 * Metodo encargado de conectarse a una URL, detectar si existe conexion, y
+	 * escribir en un fichero, si existe conexion, llama al metodo escribir en
+	 * fichero pasandole el nombre, el codigo html y false. Si no existe
+	 * conexion, le paso el nombre del fichero de error, la URL y true
+	 * 
+	 * @param url
+	 *            Ruta de la URL
+	 */
 	private void descargaFichero(String url) {
-
 		Connection conn = Jsoup.connect(url);
 		try {
 			Response resp = conn.execute();
 			if (resp.statusCode() == 200) {
 				String html = conn.get().html();
+				// Reemplazo el . por el espacio para poder hacer un split
 				url = url.replace(".", " ");
+				// Esta condicion esta creada para que no reemplace paginas que
+				// ya existen, por lo que inserto la(s) extension(es)
 				if (url.split(" ").length > 3)
 					escribirFichero(url.split(" ")[1] + "." + url.split(" ")[2] + "." + url.split(" ")[3], html, false);
 				else
@@ -92,6 +106,20 @@ public class WebProcessor {
 
 	}
 
+	/**
+	 * Si error es true escribe en el fichero de error, con el valor de true
+	 * para insertar en la siguiente linea, si no, reemplaza los archivos. El
+	 * semaforo controla la exclusion mutuas, que solo se pueda escribir una vez
+	 * en el fichero de error de manera simultanea y que no se produzca un
+	 * fichero corrupto
+	 * 
+	 * @param nombreFichero
+	 *            nombre del fichero para insertar
+	 * @param texto
+	 *            texto a insertar
+	 * @param error
+	 *            variable booleana que indica si se ha producido un error o no
+	 */
 	private void escribirFichero(String nombreFichero, String texto, boolean error) {
 		BufferedWriter bw = null;
 		try {
@@ -112,85 +140,62 @@ public class WebProcessor {
 
 			e.printStackTrace();
 		} catch (InterruptedException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} finally {
 			if (bw != null) {
 				try {
 					bw.close();
 				} catch (IOException e) {
-					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
 			}
 		}
-		semMaxDescargas.release();
+		//semMaxDescargas.release();
 	}
 
+	/**
+	 * Este proceso es llamado desde el hilo finalizaProceso y ponemos la
+	 * variable terminar a true para finalizar el bucle
+	 */
 	private void terminarHilos() {
 		try {
-			muestraProgreso.interrupt();
-			while(System.in.available()==0){
+			while (System.in.available() == 0)
 				Thread.sleep(500);
-			}
-			terminar=true;
-			semMaxDescargas.acquire(nDown);
-			semMaxEscritura.acquire();
-			System.out.println("Terminando proceso");
-			
-
-		} catch (InterruptedException e) {
-			System.out.println("error interrumpiendo descargas");
-
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-	}
-
-	private void detectaTecla() {
-		if (new Scanner(System.in).hasNextLine()) {
-			
-			terminarHilos();
+			terminar = true;
+			System.out.println("Finalizando proceso");
+		} catch (IOException | InterruptedException e) {
 		}
 
 	}
 
+	/**
+	 * Comprueba que existe un fichero y que este no es un directorio
+	 * 
+	 * @param nombreFichero
+	 *            nombre del fichero
+	 * @return
+	 */
 	public static boolean existeFichero(String nombreFichero) {
 		if (new File(nombreFichero).exists() && !(new File(nombreFichero).isDirectory())) {
 			return true;
 		} else {
-			System.out.println("error leyendo el fichero");
+			System.out.println("Error leyendo el fichero");
 			return false;
 		}
 	}
 
+	/**
+	 * Mientras terminar sea false, se mostrara el progreso cada 3 segundos.
+	 * Este metodo sera insertado en el hilo muestraProgreso
+	 */
 	private void mostrarProgreso() {
-
-		while (true) {
-			System.out.println(progreso);
-
+		while (!terminar) {
 			try {
+				System.out.println(progreso);
 				Thread.sleep(3000);
 			} catch (InterruptedException e) {
-				// TODO Auto-generated catch block
 
 			}
 		}
 	}
-
-	public static void main(String[] args) {
-		// TODO Auto-generated method stub
-		String ficheroEntrada;
-		do {
-			System.out.println("Introduce el fichero con las páginas web que quieres descargar");
-
-		} while (!existeFichero(ficheroEntrada = new Scanner(System.in).nextLine()));
-		System.out.println("Introduce el directorio donde quieres guardar las descargas");
-		String ruta = new Scanner(System.in).nextLine();
-		WebProcessor wp = new WebProcessor(ruta, 200, 20);
-		wp.process(ficheroEntrada);
-
-	}
-
 }
