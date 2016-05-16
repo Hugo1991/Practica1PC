@@ -6,13 +6,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.Scanner;
 import java.util.concurrent.Semaphore;
-
-import javax.crypto.ExemptionMechanismSpi;
-
 import org.jsoup.Connection;
 import org.jsoup.Connection.Response;
 import org.jsoup.Jsoup;
@@ -21,32 +15,46 @@ public class WebProcessor {
 	private String ruta;
 	private int nDown; // número de procesos de descarga que lanzará la
 						// aplicación
-	private int maxDown; // máximo número de procesos que pueden descargar webs
-							// a la vez
 	private int progreso;
-	private Semaphore semMaxDescargas;
-	private Semaphore semMaxEscritura = new Semaphore(1);
-	private ArrayList<Thread> hilos;
-	private Thread muestraProgreso = new Thread(() -> mostrarProgreso(), "Hilo mostrar progreso");
-	private boolean terminar = false;
-	private Thread finalizaProceso = new Thread(() -> terminarHilos(), "Termina hilo");
+	private Semaphore semMaxDescargas; // Sincronizacion condicional
+	private Semaphore semMaxEscritura; // Exclusion mutua
+	private Thread muestraProgreso;
+	private boolean terminar;
+	private Thread finalizaProceso;
 
+	/**
+	 * Inicializamos todas las variables, iniciamos los hilos de muestraProgreso
+	 * y finalizaProceso y ponemos que el semaforo de maxDescargas sea igual al
+	 * maximo numero de descargas que le pasamos al constructor
+	 * 
+	 * @param path
+	 * @param nDown
+	 * @param maxDown
+	 */
 	public WebProcessor(String path, int nDown, int maxDown) {
 		ruta = path;
 		this.nDown = nDown;
-		this.maxDown = maxDown;
 		progreso = 0;
+		semMaxDescargas = new Semaphore(maxDown);
+		semMaxEscritura = new Semaphore(1);
+
+		finalizaProceso = new Thread(() -> terminarHilos(), "Termina hilo");
+		finalizaProceso.start();
+		muestraProgreso = new Thread(() -> mostrarProgreso(), "Hilo mostrar progreso");
 		muestraProgreso.setDaemon(true);
 		muestraProgreso.start();
-		semMaxDescargas = new Semaphore(this.maxDown);
-		hilos = new ArrayList<>();
-		finalizaProceso.start();
 
+		terminar = false;
 	}
 
 	/**
-	 * metodo encargado de leer el fichero de texto que le pasamos al metodo. este metodo esta bajo sincronizacion condicional
+	 * metodo encargado de leer el fichero de texto que le pasamos al metodo.
+	 * este metodo esta bajo sincronizacion condicional para que no haya mas de
+	 * x descargas simultaneas y crea los hilos para descargar cada una de las
+	 * paginas
+	 * 
 	 * @param fileName
+	 *            nombre del fichero a leer
 	 */
 	public void process(String fileName) {
 		try {
@@ -57,10 +65,8 @@ public class WebProcessor {
 				String lineaCopia = linea;
 				semMaxDescargas.acquire();
 				Thread th = new Thread(() -> descargaFichero(lineaCopia), "Hilo " + progreso);
-				hilos.add(th);
 				th.start();
 				progreso++;
-				semMaxDescargas.release();
 				linea = b.readLine();
 			}
 			b.close();
@@ -111,7 +117,7 @@ public class WebProcessor {
 	 * para insertar en la siguiente linea, si no, reemplaza los archivos. El
 	 * semaforo controla la exclusion mutuas, que solo se pueda escribir una vez
 	 * en el fichero de error de manera simultanea y que no se produzca un
-	 * fichero corrupto
+	 * fichero corrupto. libera el recurso del maximo de descargas simultaneas.
 	 * 
 	 * @param nombreFichero
 	 *            nombre del fichero para insertar
@@ -150,7 +156,7 @@ public class WebProcessor {
 				}
 			}
 		}
-		//semMaxDescargas.release();
+		semMaxDescargas.release();
 	}
 
 	/**

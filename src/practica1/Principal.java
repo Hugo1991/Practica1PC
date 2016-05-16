@@ -12,7 +12,7 @@ public class Principal {
 		} while (!WebProcessor.existeFichero(ficheroEntrada = new Scanner(System.in).nextLine()));
 		System.out.println("Introduce el directorio donde quieres guardar las descargas");
 		String ruta = new Scanner(System.in).nextLine();
-		WebProcessor wp = new WebProcessor(ruta, 2000, 20);
+		WebProcessor wp = new WebProcessor(ruta, 200, 20);
 		wp.process(ficheroEntrada);
 
 	}
